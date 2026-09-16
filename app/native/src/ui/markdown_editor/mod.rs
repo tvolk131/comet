@@ -3,6 +3,7 @@
 //! source layout is replaced by paragraphs whose glyphs map back to Markdown.
 mod attachments;
 pub(crate) mod document;
+mod reveal;
 mod scrollbar;
 use super::Message;
 use document::{physical_lines, Document, Line};
@@ -132,6 +133,7 @@ pub fn editor<'a>(
         size,
         theme: theme.iced(),
         tag_background: theme.colors.primary_container,
+        reveal_duration: theme.motion.short,
         input: iced::widget::text_editor(content)
             .id("markdown-editor")
             .on_action(|action| action)
@@ -151,6 +153,7 @@ struct MarkdownEditor<'a> {
     size: f32,
     theme: Theme,
     tag_background: Color,
+    reveal_duration: std::time::Duration,
     input: Element<'a, Action>,
     controls: Vec<(usize, bool, Element<'a, Message>)>,
     attachments: Option<std::path::PathBuf>,
@@ -170,6 +173,9 @@ struct State {
     pointer: Option<PointerGesture>,
     scrollbar_grab: Option<f32>,
     scrollbar_hovered: bool,
+    reveal_motion: reveal::Motion,
+    motion_layout: Option<(Size, f32)>,
+    follow_reveal: bool,
 }
 struct PointerGesture {
     origin: Point,
@@ -337,6 +343,8 @@ impl Widget<Message, Theme, Renderer> for MarkdownEditor<'_> {
             state.scrollbar_hovered = false;
             state.preferred_x = None;
             state.pointer = None;
+            state.reveal_motion = reveal::Motion::default();
+            state.follow_reveal = false;
             state.identity = self.note_id.into();
         }
         // Revealing or hiding syntax can move text horizontally, wrap lines or
@@ -345,7 +353,25 @@ impl Widget<Message, Theme, Renderer> for MarkdownEditor<'_> {
         if state.pointer.is_none() {
             state.reveal = focused.then_some(offset.min(selection)..offset.max(selection));
         }
-        state.document = Document::parse(&source, state.reveal.clone());
+        if state.motion_layout != Some((limits.max(), self.size)) {
+            state.reveal_motion.finish();
+            state.motion_layout = Some((limits.max(), self.size));
+        }
+        state.document = state.reveal_motion.resolve(
+            &source,
+            Document::parse(&source, state.reveal.clone()),
+            self.reveal_duration,
+            |line| {
+                let size = line_size(line, self.size);
+                let paragraph = make_paragraph(
+                    line,
+                    size,
+                    content_limits.max().width - line_indent(line) - 8.0,
+                    &self.theme,
+                );
+                paragraph.buffer().layout_runs().nth(1).is_some()
+            },
+        );
         let mut y = 0.0;
         state.lines = state
             .document
@@ -353,20 +379,8 @@ impl Widget<Message, Theme, Renderer> for MarkdownEditor<'_> {
             .iter()
             .enumerate()
             .map(|(line_index, line)| {
-                let x = if line.bullet.is_some() || line.task.is_some() {
-                    32.0
-                } else if line.quote {
-                    18.0
-                } else {
-                    0.0
-                } + line.indent.min(12) as f32 * 16.0;
-                let size = self.size
-                    * match line.heading {
-                        Some(1) => 1.85,
-                        Some(2) => 1.5,
-                        Some(3) => 1.25,
-                        _ => 1.0,
-                    };
+                let x = line_indent(line);
+                let size = line_size(line, self.size);
                 let paragraph = make_paragraph(
                     line,
                     size,
@@ -434,7 +448,7 @@ impl Widget<Message, Theme, Renderer> for MarkdownEditor<'_> {
                 let result = LayoutLine {
                     paragraph,
                     x,
-                    y,
+                    y: y + line.offset_y(),
                     height,
                     image,
                     image_size,
@@ -445,12 +459,15 @@ impl Widget<Message, Theme, Renderer> for MarkdownEditor<'_> {
             })
             .collect();
         state.height = y + self.size * 2.0;
+        if focused && state.cursor != Some(offset) {
+            state.follow_reveal = true;
+        }
         if focused
             && state
                 .pointer
                 .as_ref()
                 .is_none_or(|pointer| pointer.dragging)
-            && state.cursor != Some(offset)
+            && (state.cursor != Some(offset) || state.follow_reveal)
         {
             let caret = state.caret(offset);
             if caret.y < state.scroll {
@@ -461,6 +478,9 @@ impl Widget<Message, Theme, Renderer> for MarkdownEditor<'_> {
             }
         }
         state.cursor = Some(offset);
+        if !state.reveal_motion.active() {
+            state.follow_reveal = false;
+        }
         state.scroll = state
             .scroll
             .clamp(0.0, (state.height - limits.max().height).max(0.0));
@@ -516,6 +536,16 @@ impl Widget<Message, Theme, Renderer> for MarkdownEditor<'_> {
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
+        if let Event::Window(iced::window::Event::RedrawRequested(now)) = event {
+            let state = tree.state.downcast_mut::<State>();
+            if state.reveal_motion.tick(
+                *now,
+                state.pointer.is_some() || state.scrollbar_grab.is_some(),
+            ) {
+                shell.invalidate_layout();
+                shell.request_redraw();
+            }
+        }
         if matches!(
             event,
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
@@ -525,6 +555,12 @@ impl Widget<Message, Theme, Renderer> for MarkdownEditor<'_> {
         {
             tree.state.downcast_mut::<State>().cursor = None;
             shell.invalidate_layout();
+            shell.request_redraw();
+        }
+        if tree.state.downcast_ref::<State>().reveal_motion.active()
+            && tree.state.downcast_ref::<State>().pointer.is_none()
+            && tree.state.downcast_ref::<State>().scrollbar_grab.is_none()
+        {
             shell.request_redraw();
         }
         let state = tree.state.downcast_mut::<State>();
@@ -563,6 +599,7 @@ impl Widget<Message, Theme, Renderer> for MarkdownEditor<'_> {
                 return;
             }
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) if over_scrollbar => {
+                state.follow_reveal = false;
                 let bar = scrollbar.unwrap();
                 let position = cursor.position().unwrap();
                 // Keep the grabbed point under the pointer. A track click centers
@@ -586,6 +623,7 @@ impl Widget<Message, Theme, Renderer> for MarkdownEditor<'_> {
                 return;
             }
             Event::Mouse(mouse::Event::WheelScrolled { delta }) if over_viewport => {
+                state.follow_reveal = false;
                 // Handle raw deltas before the native source editor converts
                 // pixels to integer lines. Trackpads stay smooth and 1:1; mouse
                 // wheels move one rendered row per line, with no extra multiplier.
@@ -688,6 +726,19 @@ impl Widget<Message, Theme, Renderer> for MarkdownEditor<'_> {
                     return;
                 }
             }
+        }
+        if matches!(
+            event,
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
+        ) && cursor.is_over(clip)
+        {
+            // Double/triple clicks emit SelectWord/SelectLine instead of Click.
+            // Freeze every document press, including those selection gestures.
+            tree.state.downcast_mut::<State>().pointer = Some(PointerGesture {
+                origin: cursor.position().unwrap()
+                    - Vector::new(content_bounds.x, content_bounds.y),
+                dragging: false,
+            });
         }
         let mut actions = Vec::new();
         let mut local = Shell::new(&mut actions);
@@ -856,7 +907,12 @@ impl Widget<Message, Theme, Renderer> for MarkdownEditor<'_> {
                             ),
                             ..Default::default()
                         },
-                        theme.extended_palette().background.strong.color,
+                        theme
+                            .extended_palette()
+                            .background
+                            .strong
+                            .color
+                            .scale_alpha(data.opacity()),
                     );
                 }
                 if data.hidden {
@@ -871,14 +927,19 @@ impl Widget<Message, Theme, Renderer> for MarkdownEditor<'_> {
                             ),
                             ..Default::default()
                         },
-                        theme.extended_palette().background.strong.color,
+                        theme
+                            .extended_palette()
+                            .background
+                            .strong
+                            .color
+                            .scale_alpha(data.opacity()),
                     );
                     continue;
                 }
                 if let Some(image) = &line.image {
                     if line.image_size.height > 0.0 {
                         renderer.draw_image(
-                            image::Image::new(image.clone()),
+                            image::Image::new(image.clone()).opacity(data.opacity()),
                             Rectangle::new(origin, line.image_size),
                             clip,
                         );
@@ -893,13 +954,23 @@ impl Widget<Message, Theme, Renderer> for MarkdownEditor<'_> {
                                 bounds: Rectangle::new(origin, Size::new(cell.width, line.height)),
                                 border: Border {
                                     width: 1.0,
-                                    color: theme.extended_palette().background.strong.color,
+                                    color: theme
+                                        .extended_palette()
+                                        .background
+                                        .strong
+                                        .color
+                                        .scale_alpha(data.opacity()),
                                     ..Default::default()
                                 },
                                 ..Default::default()
                             },
                             if data.table_header {
-                                theme.extended_palette().background.weak.color
+                                theme
+                                    .extended_palette()
+                                    .background
+                                    .weak
+                                    .color
+                                    .scale_alpha(data.opacity())
                             } else {
                                 Color::TRANSPARENT
                             },
@@ -910,7 +981,7 @@ impl Widget<Message, Theme, Renderer> for MarkdownEditor<'_> {
                             &cell.paragraph,
                             &cell.data,
                             origin,
-                            self.tag_background,
+                            self.tag_background.scale_alpha(data.opacity()),
                         );
                         if let Some(selection) = &selection {
                             draw_selection(
@@ -919,7 +990,12 @@ impl Widget<Message, Theme, Renderer> for MarkdownEditor<'_> {
                                 &cell.data,
                                 selection,
                                 origin,
-                                theme.extended_palette().primary.weak.color,
+                                theme
+                                    .extended_palette()
+                                    .primary
+                                    .weak
+                                    .color
+                                    .scale_alpha(data.opacity()),
                             );
                         }
                         renderer.fill_paragraph(
@@ -931,7 +1007,13 @@ impl Widget<Message, Theme, Renderer> for MarkdownEditor<'_> {
                     }
                     continue;
                 }
-                draw_tags(renderer, &line.paragraph, data, origin, self.tag_background);
+                draw_tags(
+                    renderer,
+                    &line.paragraph,
+                    data,
+                    origin,
+                    self.tag_background.scale_alpha(data.opacity()),
+                );
                 if let Some(selection) = &selection {
                     draw_selection(
                         renderer,
@@ -939,7 +1021,12 @@ impl Widget<Message, Theme, Renderer> for MarkdownEditor<'_> {
                         data,
                         selection,
                         origin,
-                        theme.extended_palette().primary.weak.color,
+                        theme
+                            .extended_palette()
+                            .primary
+                            .weak
+                            .color
+                            .scale_alpha(data.opacity()),
                     );
                 }
                 if data.task.is_none() {
@@ -957,7 +1044,7 @@ impl Widget<Message, Theme, Renderer> for MarkdownEditor<'_> {
                                 wrapping: text::Wrapping::None,
                             },
                             Point::new(origin.x - 26.0, origin.y),
-                            theme.palette().text,
+                            theme.palette().text.scale_alpha(data.opacity()),
                             clip,
                         );
                     }
@@ -981,7 +1068,10 @@ impl Widget<Message, Theme, Renderer> for MarkdownEditor<'_> {
                                     ),
                                     ..Default::default()
                                 },
-                                theme.palette().text,
+                                theme
+                                    .palette()
+                                    .text
+                                    .scale_alpha(data.opacity() * run.visibility),
                             );
                         }
                     }
@@ -1000,8 +1090,15 @@ impl Widget<Message, Theme, Renderer> for MarkdownEditor<'_> {
                 );
             }
             if focused {
-                let caret =
-                    state.caret(source_offset(self.content, self.content.cursor().position));
+                let offset = source_offset(self.content, self.content.cursor().position);
+                let caret = state.caret(offset);
+                let opacity = state
+                    .document
+                    .lines
+                    .iter()
+                    .rev()
+                    .find(|line| line.source.start <= offset)
+                    .map_or(1.0, Line::opacity);
                 renderer.fill_quad(
                     renderer::Quad {
                         bounds: Rectangle {
@@ -1011,7 +1108,7 @@ impl Widget<Message, Theme, Renderer> for MarkdownEditor<'_> {
                         },
                         ..Default::default()
                     },
-                    theme.palette().primary,
+                    theme.palette().primary.scale_alpha(opacity),
                 );
             }
         });
@@ -1157,7 +1254,7 @@ fn draw_tags(
     origin: Point,
     color: Color,
 ) {
-    for (index, _) in line
+    for (index, run) in line
         .runs
         .iter()
         .enumerate()
@@ -1176,9 +1273,28 @@ fn draw_tags(
                     },
                     ..renderer::Quad::default()
                 },
-                color,
+                color.scale_alpha(run.visibility),
             );
         }
+    }
+}
+
+fn line_indent(line: &Line) -> f32 {
+    (if line.bullet.is_some() || line.task.is_some() {
+        32.0
+    } else if line.quote {
+        18.0
+    } else {
+        0.0
+    }) + line.indent.min(12) as f32 * 16.0
+}
+
+fn line_size(line: &Line, size: f32) -> f32 {
+    size * match line.heading {
+        Some(1) => 1.85,
+        Some(2) => 1.5,
+        Some(3) => 1.25,
+        _ => 1.0,
     }
 }
 
@@ -1210,8 +1326,14 @@ fn make_paragraph(line: &Line, size: f32, width: f32, theme: &Theme) -> Paragrap
             } else {
                 theme.palette().text
             };
-            let span = text::Span::new(run.text.as_str()).font(font).color(color);
-            if run.style.tag {
+            let span = text::Span::new(run.text.as_str())
+                .font(font)
+                .color(color.scale_alpha(run.visibility * line.opacity()));
+            if run.visibility < 1.0 && !line.fence {
+                let full_size = if run.style.tag { size * 0.9 } else { size };
+                span.size((full_size * run.visibility).max(0.01))
+                    .line_height(text::LineHeight::Absolute((size * 1.5).into()))
+            } else if run.style.tag {
                 span.size(size * 0.9)
                     .line_height(text::LineHeight::Absolute((size * 1.5).into()))
             } else {

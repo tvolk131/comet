@@ -105,6 +105,7 @@ pub enum Message {
     CloseDialog,
     Action(NoteAction),
     Dark(bool),
+    EditorAnimations(bool),
     FontSize(f32),
     Find(String),
     ToggleFind,
@@ -165,6 +166,8 @@ pub struct Comet {
     pub panel: Panel,
     pub dialog: DialogState,
     pub dark: bool,
+    pub reduced_motion: bool,
+    pub editor_animations: bool,
     pub font_size: f32,
     pub window_scale_factor: f32,
     pub dirty: bool,
@@ -210,6 +213,8 @@ impl Default for Comet {
             panel: Panel::Notes,
             dialog: DialogState::default(),
             dark: false,
+            reduced_motion: false,
+            editor_animations: true,
             font_size: 17.0,
             window_scale_factor: 1.0,
             dirty: false,
@@ -243,6 +248,7 @@ impl Comet {
         let mut app = Self {
             events: Some(context.subscribe()),
             context: Some(context.clone()),
+            reduced_motion: theme::system_reduced_motion(),
             ..Self::default()
         };
         if let Err(error) = app.bootstrap() {
@@ -261,7 +267,10 @@ impl Comet {
         (app, task)
     }
     pub fn theme(&self) -> Theme {
-        theme::theme(self.dark)
+        theme::theme(self.dark).reduced_motion(self.reduced_motion)
+    }
+    fn editor_theme(&self) -> Theme {
+        theme::theme(self.dark).reduced_motion(self.reduced_motion || !self.editor_animations)
     }
     pub fn view(&self) -> Element<'_, Message> {
         view::view(self)
@@ -377,6 +386,7 @@ impl Comet {
             Ok(bytes) => match serde_json::from_slice::<Preferences>(&bytes) {
                 Ok(p) => {
                     self.dark = p.dark;
+                    self.editor_animations = p.editor_animations;
                     self.font_size = p.font_size.clamp(12.0, 28.0);
                 }
                 Err(e) => self.error = Some(format!("Cannot read appearance settings: {e}")),
@@ -389,6 +399,7 @@ impl Comet {
         if let Some(ctx) = &self.context {
             let bytes = serde_json::to_vec_pretty(&Preferences {
                 dark: self.dark,
+                editor_animations: self.editor_animations,
                 font_size: self.font_size,
             })?;
             std::fs::write(ctx.config_dir.join("native-ui.json.tmp"), bytes)?;
@@ -404,6 +415,12 @@ impl Comet {
 struct Preferences {
     dark: bool,
     font_size: f32,
+    #[serde(default = "editor_animations_default")]
+    editor_animations: bool,
+}
+
+fn editor_animations_default() -> bool {
+    true
 }
 
 pub fn run(context: AppContext) -> iced::Result {

@@ -15,13 +15,21 @@ pub struct Style {
     pub link: Option<Arc<str>>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Run {
     pub text: String,
     pub style: Style,
+    /// Presentation only: the fraction of a revealed delimiter's width/opacity.
+    pub visibility: f32,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Appearance {
+    pub opacity: f32,
+    pub offset_y: f32,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Line {
     pub source: Range<usize>,
     pub text: String,
@@ -39,8 +47,15 @@ pub struct Line {
     pub image: Option<String>,
     pub table_header: bool,
     pub table_cells: Vec<Line>,
+    pub appearance: Option<Appearance>,
 }
 impl Line {
+    pub fn opacity(&self) -> f32 {
+        self.appearance.map_or(1.0, |a| a.opacity)
+    }
+    pub fn offset_y(&self) -> f32 {
+        self.appearance.map_or(0.0, |a| a.offset_y)
+    }
     pub fn source_at(&self, display: usize) -> usize {
         self.boundaries
             .iter()
@@ -57,7 +72,7 @@ impl Line {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Document {
     pub lines: Vec<Line>,
 }
@@ -358,6 +373,7 @@ impl Document {
                     line.runs.push(Run {
                         text: String::new(),
                         style: style.clone(),
+                        visibility: 1.0,
                     });
                 }
                 line.runs.last_mut().unwrap().text.push(character);
@@ -387,6 +403,7 @@ impl Document {
                             cell.runs.push(Run {
                                 text: String::new(),
                                 style: style.clone(),
+                                visibility: 1.0,
                             });
                         }
                         cell.runs.last_mut().unwrap().text.push(character);
@@ -405,6 +422,7 @@ impl Document {
                 };
                 line.runs = vec![Run {
                     text: line.text.clone(),
+                    visibility: 1.0,
                     style: Style {
                         muted: true,
                         ..Style::default()

@@ -31,6 +31,11 @@ fn snapshot_with_focus(name: &str, size: (u16, u16), app: &Comet, focus: bool) {
         // editor focus to exercise delimiter reveal in its production layout.
         ui.click(iced_test::selector::id("markdown-editor"))
             .unwrap();
+        // Compare the settled editor, as the interaction driver does. The
+        // reveal transition starts in layout before this redraw is dispatched.
+        ui.simulate([Event::Window(iced::window::Event::RedrawRequested(
+            iced::time::Instant::now() + std::time::Duration::from_secs(2),
+        ))]);
     }
     let snapshot = ui
         .snapshot(&app.theme().reduced_motion(true))
@@ -338,5 +343,28 @@ fn settings_scroll_distance_is_consistent_across_display_scales() {
         baseline::assert_snapshot("settings-scrolled-640x480", |path| {
             image.matches_image(path).unwrap()
         });
+    }
+}
+
+#[test]
+fn settings_editor_animation_switch_is_visible_and_toggles() {
+    for size in [(640, 480), (1024, 768), (1440, 900)] {
+        for enabled in [true, false] {
+            let mut app = fixtures::notebook();
+            app.editor_animations = enabled;
+            app.dialog.show(Dialog::Settings);
+            let name = format!(
+                "settings-animations-{}-{}",
+                size.0,
+                if enabled { "on" } else { "off" }
+            );
+            snapshot(&name, size, &app);
+            let mut ui = simulator(&app, size);
+            ui.click(selector::id("editor-animations-switch")).unwrap();
+            let messages: Vec<_> = ui.into_messages().collect();
+            assert!(
+                matches!(messages.as_slice(), [Message::EditorAnimations(value)] if *value != enabled)
+            );
+        }
     }
 }

@@ -406,3 +406,39 @@ fn find_selects_unicode_without_changing_markdown() {
     assert_eq!(app.editor.selection().as_deref(), Some("café"));
     assert_eq!(app.editor.text(), source);
 }
+
+#[tokio::test]
+async fn editor_animation_preference_defaults_on_and_survives_relaunch() {
+    let (_dir, mut app) = app();
+    assert!(app.editor_animations);
+    let context = app.context.clone().unwrap();
+    // Existing appearance files inherit the enabled default.
+    std::fs::write(
+        context.config_dir.join("native-ui.json"),
+        r#"{"dark":true,"font_size":19}"#,
+    )
+    .unwrap();
+    app.load_preferences();
+    assert!(app.editor_animations);
+    assert!(app.dark);
+    for enabled in [false, true] {
+        let _ = app.update(Message::EditorAnimations(enabled));
+        assert!(app.error.is_none(), "{:?}", app.error);
+        let (reopened, _) = Comet::new(context.clone());
+        assert_eq!(reopened.editor_animations, enabled);
+        assert!(reopened.dark);
+        assert!((reopened.font_size - 19.0).abs() < f32::EPSILON);
+    }
+}
+
+#[test]
+fn editor_animation_switch_respects_system_motion_and_only_changes_editor_theme() {
+    let mut app = Comet::default();
+    assert!(!app.editor_theme().motion.short.is_zero());
+    let _ = app.update(Message::EditorAnimations(false));
+    assert!(app.editor_theme().motion.short.is_zero());
+    assert!(!app.theme().motion.short.is_zero());
+    let _ = app.update(Message::EditorAnimations(true));
+    app.reduced_motion = true;
+    assert!(app.editor_theme().motion.short.is_zero());
+}

@@ -434,6 +434,10 @@ impl Comet {
                 self.font_size = size;
                 self.save_preferences()?;
             }
+            Message::EditorAnimations(enabled) => {
+                self.editor_animations = enabled;
+                self.save_preferences()?;
+            }
             Message::ToggleFind => {
                 self.find = if self.find.is_some() {
                     None

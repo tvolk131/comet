@@ -5,6 +5,17 @@ use iced::Color;
 use iced_m3::Theme;
 use std::sync::OnceLock;
 
+pub fn system_reduced_motion() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        objc2_app_kit::NSWorkspace::sharedWorkspace().accessibilityDisplayShouldReduceMotion()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        false
+    }
+}
+
 pub fn theme(dark: bool) -> Theme {
     static THEMES: OnceLock<[Theme; 2]> = OnceLock::new();
     THEMES.get_or_init(|| {

@@ -1245,3 +1245,46 @@ fn scrollbar_dragging_and_track_clicks_preserve_the_document_cursor() {
         );
     }
 }
+
+#[test]
+fn wrapped_reveal_does_not_fade_unchanged_text() {
+    use iced::{time::Instant, Rectangle};
+    use std::time::Duration;
+    for (size, font) in [((640, 480), 28.0), ((1024, 768), 17.0), ((1440, 900), 17.0)] {
+        for source in [
+            format!(
+                "Text **{}** end\nBelow",
+                "alpha beta gamma delta ".repeat(12).trim_end()
+            ),
+            format!(
+                "Text [link](https://example.com/{}) end\nBelow",
+                "long-path/".repeat(30)
+            ),
+        ] {
+            let mut ui = EditorDriver::new(&source, size).font_size(font);
+            ui.click(0.0, 12.0);
+            for _ in 0..4 {
+                ui.key(ArrowRight);
+            }
+            // The first letters never move and exclude both caret positions.
+            let area = Rectangle {
+                x: 1.0,
+                y: 0.0,
+                width: 24.0,
+                height: font * 1.5,
+            };
+            let resting = ui.region(area);
+            for key in [ArrowRight, ArrowLeft, ArrowRight, ArrowLeft] {
+                ui.key(key);
+                let now = Instant::now();
+                for ms in [0, 30, 75, 120, 200] {
+                    assert!(
+                        ui.region_at(area, now + Duration::from_millis(ms)) == resting,
+                        "Unchanged text flickered at {ms} ms, size {size:?}, font {font}"
+                    );
+                }
+            }
+            assert_eq!(ui.cursor(), (0, 4));
+        }
+    }
+}

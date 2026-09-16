@@ -500,7 +500,7 @@ fn editor(app: &Comet, split: bool) -> Element<'_, Message> {
             &app.editor,
             &note.id,
             app.font_size,
-            app.theme(),
+            app.editor_theme(),
             !note.readonly && note.deleted_at.is_none(),
             app.attachment_dir.as_deref(),
         ),
@@ -556,6 +556,16 @@ fn dialog_content(app: &Comet, which: Dialog, height: f32) -> Element<'_, Messag
                     row![
                         text("Dark appearance").width(Length::Fill),
                         switch(app.dark).on_toggle(Message::Dark)
+                    ]
+                    .align_y(alignment::Vertical::Center),
+                )
+                .push(
+                    row![
+                        text("Editor animations").width(Length::Fill),
+                        container(
+                            switch(app.editor_animations).on_toggle(Message::EditorAnimations)
+                        )
+                        .id("editor-animations-switch")
                     ]
                     .align_y(alignment::Vertical::Center),
                 )

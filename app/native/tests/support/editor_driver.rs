@@ -92,17 +92,14 @@ impl EditorDriver {
     }
 
     /// Compare a stable part of the actual rendered editor across input events.
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     pub fn region(&mut self, area: Rectangle) -> Vec<u8> {
         let frame = self.capture();
-        let mut pixels = Vec::new();
-        for y in (area.y * 2.0) as u32..((area.y + area.height) * 2.0) as u32 {
-            for x in (area.x * 2.0) as u32..((area.x + area.width) * 2.0) as u32 {
-                let offset = ((y * frame.width + x) * 4) as usize;
-                pixels.extend_from_slice(&frame.rgba[offset..offset + 4]);
-            }
-        }
-        pixels
+        frame.region(area)
+    }
+
+    /// Inspect a live animation frame without settling its redraw clock.
+    pub fn region_at(&mut self, area: Rectangle, now: iced::time::Instant) -> Vec<u8> {
+        self.capture_at(now).region(area)
     }
 
     /// Visible ink bounds, excluding the plain editor background and faint edges.
@@ -528,14 +525,18 @@ impl EditorDriver {
         assert_snapshot(name, |path| capture.matches(path));
     }
 
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // Rounded, clamped pixel coordinates in a u16 viewport.
     fn capture(&mut self) -> Capture {
-        let bounds = self.bounds();
         self.redraw();
         // Capture the settled Material state, including nested themed controls.
         // Advancing the redraw timestamp avoids wall-clock sleeps and animation
         // timing differences between fast local runs and slower CI machines.
-        self.redraw_at(iced::time::Instant::now() + std::time::Duration::from_secs(2));
+        self.capture_at(iced::time::Instant::now() + std::time::Duration::from_secs(2))
+    }
+
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // Rounded, clamped pixel coordinates in a u16 viewport.
+    fn capture_at(&mut self, now: iced::time::Instant) -> Capture {
+        let bounds = self.bounds();
+        self.redraw_at(now);
         let size = Size::new(
             u32::from(self.size.width) * 2,
             u32::from(self.size.height) * 2,
@@ -572,6 +573,18 @@ struct Capture {
     height: u32,
 }
 impl Capture {
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    fn region(&self, area: Rectangle) -> Vec<u8> {
+        let mut pixels = Vec::new();
+        for y in (area.y * 2.0) as u32..((area.y + area.height) * 2.0) as u32 {
+            for x in (area.x * 2.0) as u32..((area.x + area.width) * 2.0) as u32 {
+                let offset = ((y * self.width + x) * 4) as usize;
+                pixels.extend_from_slice(&self.rgba[offset..offset + 4]);
+            }
+        }
+        pixels
+    }
+
     fn write(&self, prefix: &Path) {
         let path = image_path(prefix);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
