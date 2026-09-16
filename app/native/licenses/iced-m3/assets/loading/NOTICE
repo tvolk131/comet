@@ -1,0 +1,10 @@
+Canonical Material loading shape and morph data
+Copyright (C) 2024 The Android Open Source Project
+Copyright 2023 The Android Open Source Project (AndroidX graphics-shapes)
+Licensed under the Apache License, Version 2.0. See LICENSE-APACHE-2.0.txt.
+
+Generated from Material Components for Android's MaterialShapes definitions and
+AndroidX graphics-shapes 1.0.1 RoundedPolygon/Morph. The generated binary contains
+matched cubic endpoints; the reference SVGs contain shape and midpoint outlines.
+The export adapters and Rust renderer are additions in iced-m3; this is
+not an Android runtime, an official Google Rust component or a certification.

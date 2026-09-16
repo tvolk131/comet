@@ -1,0 +1,16 @@
+iced-m3
+
+The Rust component library code is licensed under MIT; see LICENSE.
+
+The unmodified bundled Roboto font is licensed under SIL Open Font License 1.1;
+see assets/fonts/OFL.txt and assets/fonts/README.md.
+
+The canonical loading shape and morph data is derived from Material Components
+for Android and AndroidX graphics-shapes, licensed under Apache License 2.0;
+see assets/loading/NOTICE, assets/loading/LICENSE-APACHE-2.0.txt and
+assets/loading/README.md for the pinned sources and generation process.
+
+The package license expression describes these jointly distributed materials;
+it does not relicense the Rust code or offer a choice of licenses for the assets.
+Downstream applications can display the bundled asset notices through
+iced_m3::fonts::LICENSE and iced_m3::loading::{LICENSE, NOTICE}.

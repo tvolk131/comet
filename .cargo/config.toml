@@ -1,0 +1,4 @@
+[env]
+# iced_test otherwise prefers the GPU once it is enabled for the application.
+# This setting only controls the test simulator, not the desktop renderer.
+ICED_TEST_BACKEND = "tiny-skia"

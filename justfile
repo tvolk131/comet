@@ -5,7 +5,7 @@ install:
   pnpm install
 
 app-dev:
-  pnpm --filter @comet/app tauri:dev
+  pnpm --filter @comet/app dev
 
 app-build:
   pnpm --filter @comet/app build
@@ -20,30 +20,28 @@ app-lint-fix:
   pnpm --filter @comet/app lint:fix
 
 app-bundle:
-  pnpm --filter @comet/app tauri build --bundles app
+  pnpm --filter @comet/app bundle
 
 app-test:
   pnpm --filter @comet/app test
-  cargo test --manifest-path app/src-tauri/Cargo.toml
 
-app-test-frontend:
-  pnpm --filter @comet/app test
+app-test-screenshots:
+  pnpm --filter @comet/app test:screenshots
+
+app-test-screenshots-gpu:
+  pnpm --filter @comet/app test:screenshots:gpu
 
 app-test-backend:
-  cargo test --manifest-path app/src-tauri/Cargo.toml
-
-app-coverage-frontend:
-  pnpm --filter @comet/app test --coverage
+  cargo test --manifest-path app/native/Cargo.toml
 
 app-coverage-backend:
-  cargo tarpaulin --manifest-path app/src-tauri/Cargo.toml
+  cargo tarpaulin --manifest-path app/native/Cargo.toml
 
 app-coverage:
-  just app-coverage-frontend
   just app-coverage-backend
 
 app-clippy:
-  cargo clippy --manifest-path app/src-tauri/Cargo.toml
+  cargo clippy --manifest-path app/native/Cargo.toml
 
 app-seed:
   pnpm --filter @comet/app seed:db
@@ -54,7 +52,7 @@ app-seed-account:
 app-check:
   pnpm format:check
   pnpm exec turbo run lint typecheck test build --filter=@comet/app
-  cargo test --manifest-path app/src-tauri/Cargo.toml
+  cargo test --manifest-path app/native/Cargo.toml
 
 relay-dev:
   pnpm --filter @comet/relay dev
@@ -175,4 +173,4 @@ outdated-js:
   -pnpm outdated -r
 
 outdated-crates:
-  cargo upgrade --dry-run --manifest-path app/src-tauri/Cargo.toml --incompatible allow
+  cargo upgrade --dry-run --manifest-path app/native/Cargo.toml --incompatible allow

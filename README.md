@@ -1,6 +1,6 @@
 # comet
 
-Comet is a local-first notes app built with Tauri, React, TypeScript, and Rust.
+Comet is a local-first notes app built with Rust, iced, and iced-m3.
 
 - Local-first note-taking
 - Encrypted sync with Nostr
@@ -15,7 +15,7 @@ Comet is a local-first notes app built with Tauri, React, TypeScript, and Rust.
 
 ## Commands
 
-The full command surface lives in [justfile](/Users/chris/Repos/project/comet/justfile). Use `just --list` to see everything.
+The full command surface lives in [justfile](justfile). Use `just --list` to see everything.
 
 Common commands:
 
@@ -38,7 +38,7 @@ Comet keeps a root `app.db` plus per-account databases under `accounts/<npub>/co
 
 The app seed workflow uses a fixed seed identity from `app/.env` so repeated runs target the same account.
 
-1. Copy [`app/.env.example`](/Users/chris/Repos/project/comet/app/.env.example) to `app/.env`
+1. Copy [`app/.env.example`](app/.env.example) to `app/.env`
 2. Set `COMET_SEED_NSEC` to the seed account secret you want to reuse
 3. Run `just app-seed` for the full fixture dataset, or `just app-seed-account` to create only the seeded account workspace
 
@@ -46,28 +46,28 @@ The app seed workflow uses a fixed seed identity from `app/.env` so repeated run
 
 ## Repo Layout
 
-- [`app`](/Users/chris/Repos/project/comet/app): the Comet app workspace
-- [`app/src`](/Users/chris/Repos/project/comet/app/src): React frontend
-- [`app/src-tauri`](/Users/chris/Repos/project/comet/app/src-tauri): Tauri + Rust backend
-- [`blossom`](/Users/chris/Repos/project/comet/blossom): Bun-based Blossom server workspace
-- [`docs`](/Users/chris/Repos/project/comet/docs): Astro Starlight docs site
-- [`relay`](/Users/chris/Repos/project/comet/relay): Bun-based Nostr relay workspace
-- [`packages/data`](/Users/chris/Repos/project/comet/packages/data): shared Postgres schema and migrations
-- [`packages/nostr`](/Users/chris/Repos/project/comet/packages/nostr): shared Nostr validation/auth helpers
+- [`app`](app): the Comet app workspace
+- [`app/native`](app/native): native iced desktop, SQLite storage, and Nostr sync
+- [`app/native/src/ui`](app/native/src/ui): iced views, state, and messages
+- [`blossom`](blossom): Bun-based Blossom server workspace
+- [`docs`](docs): Astro Starlight docs site
+- [`relay`](relay): Bun-based Nostr relay workspace
+- [`packages/data`](packages/data): shared Postgres schema and migrations
+- [`packages/nostr`](packages/nostr): shared Nostr validation/auth helpers
 
 ## Workspace
 
 - Root scripts use Turborepo for workspace tasks like `build`, `lint`, `typecheck`, and `test`
-- The app source, Vite config, and Tauri project live in [`app`](/Users/chris/Repos/project/comet/app)
-- The docs source and Starlight content live in [`docs`](/Users/chris/Repos/project/comet/docs)
+- The native desktop source and build configuration live in [`app`](app)
+- The docs source and Starlight content live in [`docs`](docs)
 
 ## Testing Notes
 
-- `just app-test-frontend` runs the frontend test suite
-- `just app-test-backend` runs the Rust test suite
-- `just app-test` runs both
+- `just app-test` runs the Rust and screenshot regression tests
+- `just app-test-screenshots` compares the native UI at three window sizes
+- See [native desktop development](app/native/README.md) for dependencies, screenshot updates, and packaging.
 
-Relay and Blossom development use Bun. Install Bun if you plan to run commands under [`relay`](/Users/chris/Repos/project/comet/relay) or [`blossom`](/Users/chris/Repos/project/comet/blossom). The default app workflows such as `just app-build` and `just app-check` do not require Bun.
+Relay and Blossom development use Bun. Install Bun if you plan to run commands under [`relay`](relay) or [`blossom`](blossom). The default app workflows such as `just app-build` and `just app-check` do not require Bun.
 
 Relay and Blossom test suites use Postgres. Set `TEST_DATABASE_URL` or run a local `comet_test` database before `just relay-test` or `just blossom-test`.
 
@@ -104,5 +104,5 @@ This repo uses Husky + lint-staged for a pre-commit hook on staged files. After 
 
 On commit, staged files run through:
 
-- `eslint --fix` and `prettier --write` for `*.ts` and `*.tsx`
-- `prettier --write` for `*.js`, `*.mjs`, `*.cjs`, `*.json`, `*.md`, `*.yml`, and `*.yaml`
+- `oxlint --fix` and `oxfmt --write` for `*.ts` and `*.tsx`
+- `oxfmt --write` for `*.js`, `*.mjs`, `*.cjs`, `*.json`, `*.md`, `*.yml`, and `*.yaml`

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "turbo run dev --filter=@comet/app",
-    "bundle": "pnpm tauri build --bundles app",
+    "bundle": "pnpm --filter @comet/app bundle",
     "prepare": "husky",
     "typecheck": "turbo run typecheck",
     "build": "turbo run build --filter=@comet/app",
@@ -47,10 +47,7 @@
     "www:preview": "pnpm --filter @comet/www preview",
     "format": "oxfmt --write .",
     "format:check": "oxfmt --check .",
-    "preview": "turbo run preview --filter=@comet/app",
-    "seed:db": "pnpm --filter @comet/app seed:db",
-    "tauri": "pnpm --filter @comet/app tauri",
-    "tauri:dev": "pnpm --filter @comet/app tauri:dev"
+    "seed:db": "pnpm --filter @comet/app seed:db"
   },
   "devDependencies": {
     "husky": "^9.1.7",
@@ -59,10 +56,6 @@
     "turbo": "^2.0.0"
   },
   "lint-staged": {
-    "app/**/*.{ts,tsx}": [
-      "pnpm --filter @comet/app exec oxlint --fix",
-      "pnpm --filter @comet/app exec oxfmt --write"
-    ],
     "relay/**/*.{ts,tsx}": [
       "pnpm --filter @comet/relay exec oxlint --type-aware --fix",
       "pnpm --filter @comet/relay exec oxfmt --write"
@@ -88,9 +81,6 @@
       "pnpm --filter @comet/nostr exec oxfmt --write"
     ],
     "**/*.{js,mjs,cjs,json,md,yml,yaml}": [
-      "oxfmt --write"
-    ],
-    "app/**/*.{css,html}": [
       "oxfmt --write"
     ]
   },

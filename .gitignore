@@ -10,7 +10,6 @@ app/.env*
 !app/.env.example
 web/src/routeTree.gen.ts
 app/dist/
-app/src-tauri/target/
 /.webpack/
 relay/dist/
 reports/
@@ -31,3 +30,5 @@ comet.db-wal
 *.sqlite-wal
 
 coverage/
+
+app/native/target/

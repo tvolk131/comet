@@ -3,7 +3,7 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build", "typecheck"],
-      "outputs": ["dist/**"]
+      "outputs": ["dist/**", "native/target/release/comet"]
     },
     "dev": {
       "cache": false,

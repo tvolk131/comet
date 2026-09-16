@@ -24,7 +24,10 @@ jobs:
           filters: |
             app:
               - 'app/**'
+              - '.cargo/**'
               - 'turbo.json'
+              - '.github/workflows/ci.yml'
+              - 'package.json'
             blossom:
               - 'blossom/**'
               - 'packages/nostr/**'
@@ -98,7 +101,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Lint, typecheck, and build affected packages
-        run: pnpm turbo run lint typecheck build --affected
+        run: pnpm turbo run lint typecheck build --affected --filter='!@comet/app'
 
   test:
     if: needs.changes.outputs.app == 'true'
@@ -127,16 +130,66 @@ jobs:
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: ./app/src-tauri -> target
-
-      - name: Run frontend tests
-        run: pnpm test
+          workspaces: ./app/native -> target
 
       - name: Run Rust tests
-        run: cargo test --manifest-path app/src-tauri/Cargo.toml
+        run: cargo test --locked --manifest-path app/native/Cargo.toml
 
-      - name: Vite build
-        run: pnpm build
+      - name: Check Rust formatting
+        run: cargo fmt --check --manifest-path app/native/Cargo.toml
+
+      - name: Build native desktop
+        run: cargo build --locked --manifest-path app/native/Cargo.toml
+
+      - name: Upload screenshot differences
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshot-differences
+          path: app/native/target/screenshot-failures/
+          if-no-files-found: ignore
+
+  test-wgpu:
+    name: Visual tests (wgpu / Vulkan software adapter)
+    if: needs.changes.outputs.app == 'true'
+    needs: changes
+    runs-on: ubuntu-24.04
+    env:
+      ICED_TEST_BACKEND: wgpu
+      WGPU_BACKEND: vulkan
+      # Exercise iced's GPU pipeline on ordinary hosted runners. This is not a
+      # hardware GPU benchmark or a substitute for local Metal coverage.
+      VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+      XDG_RUNTIME_DIR: /tmp/comet-runtime
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install native and Vulkan dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libdbus-1-dev libssl-dev pkg-config libfontconfig1-dev mesa-vulkan-drivers vulkan-tools
+          mkdir -p "$XDG_RUNTIME_DIR"
+          chmod 700 "$XDG_RUNTIME_DIR"
+          vulkaninfo --summary
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ./app/native -> target
+
+      - name: Compare GPU pipeline to reviewed CPU screenshots
+        run: cargo test --locked --manifest-path app/native/Cargo.toml --test screenshots --test editor_interactions -- --test-threads=1
+
+      - name: Upload screenshot differences
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshot-differences-wgpu
+          path: app/native/target/screenshot-failures/
+          if-no-files-found: ignore
 
   relay:
     if: needs.changes.outputs.relay == 'true'
@@ -236,7 +289,7 @@ jobs:
 
   build:
     if: github.event_name == 'push' && github.ref == 'refs/heads/master' && needs.changes.outputs.app == 'true'
-    needs: [changes, format, checks, test]
+    needs: [changes, format, checks, test, test-wgpu]
     strategy:
       fail-fast: false
       matrix:
@@ -259,22 +312,7 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
-            librsvg2-dev \
-            patchelf
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          run_install: false
-
-      - name: Setup Node
-        uses: actions/setup-node@v6
-        with:
-          node-version: lts/*
-          cache: pnpm
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libdbus-1-dev libssl-dev pkg-config libfontconfig1-dev patchelf libfuse2
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -284,41 +322,37 @@ jobs:
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: ./app/src-tauri -> target
+          workspaces: ./app/native -> target
 
-      - name: Install frontend dependencies
-        run: pnpm install --frozen-lockfile
+      - name: Build native desktop
+        run: cargo build --locked --release --manifest-path app/native/Cargo.toml ${{ matrix.args }}
 
-      - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0
+      - name: Install native packager
+        run: cargo install cargo-packager --version 0.11.8 --locked
+
+      - name: Package macOS application
+        if: startsWith(matrix.platform, 'macos')
+        run: python3 app/scripts/package-native.py --target ${{ matrix.arch }}-apple-darwin --formats app,dmg
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APPLE_CERTIFICATE: ${{ github.event_name == 'push' && secrets.APPLE_CERTIFICATE || '' }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ github.event_name == 'push' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
-          APPLE_SIGNING_IDENTITY: ${{ github.event_name == 'push' && secrets.APPLE_SIGNING_IDENTITY || '' }}
-          APPLE_ID: ${{ github.event_name == 'push' && secrets.APPLE_ID || '' }}
-          APPLE_PASSWORD: ${{ github.event_name == 'push' && secrets.APPLE_PASSWORD || '' }}
-          APPLE_TEAM_ID: ${{ github.event_name == 'push' && secrets.APPLE_TEAM_ID || '' }}
-        with:
-          projectPath: app
-          args: ${{ matrix.args }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
-      - name: Upload DMG artifact
-        if: github.event_name == 'push' && startsWith(matrix.platform, 'macos')
+      - name: Package Linux application
+        if: matrix.platform == 'ubuntu-22.04'
+        run: python3 app/scripts/package-native.py --formats deb,appimage
+
+      - name: Upload native installers
         uses: actions/upload-artifact@v4
         with:
-          name: dmg-${{ matrix.arch }}
-          path: app/src-tauri/target/${{ matrix.arch }}-apple-darwin/release/bundle/dmg/*.dmg
-
-      - name: Upload Linux artifacts
-        if: github.event_name == 'push' && matrix.platform == 'ubuntu-22.04'
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-${{ matrix.arch }}
+          name: native-${{ matrix.arch }}
           path: |
-            app/src-tauri/target/release/bundle/deb/*.deb
-            app/src-tauri/target/release/bundle/rpm/*.rpm
-            app/src-tauri/target/release/bundle/appimage/*.AppImage
+            app/native/target/packages/*.dmg
+            app/native/target/packages/*.deb
+            app/native/target/packages/*.AppImage
 
   release:
     if: github.event_name == 'push' && needs.changes.outputs.app == 'true'
@@ -331,18 +365,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download DMG artifacts
+      - name: Download native artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          pattern: dmg-*
-          merge-multiple: true
-
-      - name: Download Linux artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          pattern: linux-*
+          pattern: native-*
           merge-multiple: true
 
       - name: List artifacts
@@ -365,7 +392,6 @@ jobs:
           files: |
             artifacts/**/*.dmg
             artifacts/**/*.deb
-            artifacts/**/*.rpm
             artifacts/**/*.AppImage
           make_latest: true
 

@@ -7,7 +7,7 @@ APP_DB_PATH="${APP_DIR}/app.db"
 KEYCHAIN_SERVICE="comet"
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
 ENV_PATH="${SCRIPT_DIR}/../.env"
-SEED_IDENTITY_MANIFEST_PATH="${SCRIPT_DIR}/../src-tauri/Cargo.toml"
+SEED_IDENTITY_MANIFEST_PATH="${SCRIPT_DIR}/../native/Cargo.toml"
 TEST_NOTES_DIR="${SCRIPT_DIR}/test-notes"
 TEST_ATTACHMENTS_DIR="${SCRIPT_DIR}/test-attachments"
 GENERATED_SQL_PATH="$(mktemp -t comet-seed-notes.XXXXXX.sql)"
@@ -346,7 +346,7 @@ SQL
 
 cargo run \
   --quiet \
-  --manifest-path "$SCRIPT_DIR/../src-tauri/Cargo.toml" \
+  --manifest-path "$SCRIPT_DIR/../native/Cargo.toml" \
   --bin seed-snapshots \
   -- "$TEMP_DB_PATH" "$NSEC"
 
