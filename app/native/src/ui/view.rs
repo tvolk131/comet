@@ -37,7 +37,10 @@ fn surface<'a>(
 }
 
 pub fn view(app: &Comet) -> Element<'_, Message> {
-    responsive(move |size| frame(app, size)).into()
+    super::scroll_input::logical_pixels(
+        responsive(move |size| frame(app, size)).into(),
+        app.window_scale_factor,
+    )
 }
 fn frame(app: &Comet, size: iced::Size) -> Element<'_, Message> {
     let theme = app.theme();

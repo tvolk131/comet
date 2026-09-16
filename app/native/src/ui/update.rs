@@ -105,11 +105,21 @@ impl Comet {
                     | Message::ConflictLoaded(_)
                     | Message::DismissError
                     | Message::CloseWindow(_)
+                    | Message::WindowOpened(_)
+                    | Message::WindowScaleChanged(_)
             )
         {
             return Ok(Task::none());
         }
         match message {
+            Message::WindowOpened(id) => {
+                return Ok(window::scale_factor(id).map(Message::WindowScaleChanged));
+            }
+            Message::WindowScaleChanged(scale) => {
+                if scale.is_finite() && scale > 0.0 {
+                    self.window_scale_factor = scale;
+                }
+            }
             Message::FetchAttachment(hash) => {
                 if let Some(ctx) = self.context.clone() {
                     self.busy = true;

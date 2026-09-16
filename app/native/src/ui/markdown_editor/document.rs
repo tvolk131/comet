@@ -160,7 +160,10 @@ impl Document {
                         .take_while(|c| *c == b'`')
                         .count();
                     if range.len() >= width * 2 {
-                        for style in &mut styles[range.start + width..range.end - width] {
+                        // Revealed backticks belong to the code span too. If
+                        // they inherit an enclosing emphasis font instead, its
+                        // different ascent/descent moves the entire baseline.
+                        for style in &mut styles[range.clone()] {
                             style.code = true;
                         }
                         syntax.extend([

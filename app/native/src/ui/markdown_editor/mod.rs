@@ -3,6 +3,7 @@
 //! source layout is replaced by paragraphs whose glyphs map back to Markdown.
 mod attachments;
 pub(crate) mod document;
+mod scrollbar;
 use super::Message;
 use document::{physical_lines, Document, Line};
 use iced::advanced::widget::operation::focusable::Focusable as _;
@@ -23,11 +24,11 @@ use iced::{
     },
     Border, Color, Element, Event, Font, Length, Point, Rectangle, Renderer, Size, Theme, Vector,
 };
+use scrollbar::Scrollbar;
 use std::{ops::Range, path::Path};
 use unicode_segmentation::UnicodeSegmentation;
 
 const TEXT_MARGIN: f32 = 28.0;
-const SCROLLBAR_WIDTH: f32 = 6.0;
 
 pub(crate) fn source_offset(
     content: &text_editor::Content,
@@ -167,6 +168,8 @@ struct State {
     preferred_x: Option<f32>,
     reveal: Option<Range<usize>>,
     pointer: Option<PointerGesture>,
+    scrollbar_grab: Option<f32>,
+    scrollbar_hovered: bool,
 }
 struct PointerGesture {
     origin: Point,
@@ -330,6 +333,8 @@ impl Widget<Message, Theme, Renderer> for MarkdownEditor<'_> {
             .map_or(offset, |p| source_offset(self.content, p));
         if state.identity != self.note_id {
             state.scroll = 0.0;
+            state.scrollbar_grab = None;
+            state.scrollbar_hovered = false;
             state.preferred_x = None;
             state.pointer = None;
             state.identity = self.note_id.into();
@@ -522,6 +527,83 @@ impl Widget<Message, Theme, Renderer> for MarkdownEditor<'_> {
             shell.invalidate_layout();
             shell.request_redraw();
         }
+        let state = tree.state.downcast_mut::<State>();
+        let scrollbar = Scrollbar::new(layout.bounds(), state.height, state.scroll);
+        let visible = layout.bounds().intersection(viewport);
+        let over_viewport = visible.is_some_and(|bounds| cursor.is_over(bounds));
+        let over_scrollbar = over_viewport
+            && scrollbar
+                .as_ref()
+                .is_some_and(|bar| cursor.is_over(bar.track));
+        if state.scrollbar_hovered != over_scrollbar {
+            state.scrollbar_hovered = over_scrollbar;
+            shell.request_redraw();
+        }
+        match event {
+            Event::Window(iced::window::Event::Unfocused) => {
+                state.scrollbar_grab = None;
+                shell.request_redraw();
+            }
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
+                if state.scrollbar_grab.take().is_some() =>
+            {
+                shell.capture_event();
+                shell.request_redraw();
+                return;
+            }
+            Event::Mouse(mouse::Event::CursorMoved { position })
+                if state.scrollbar_grab.is_some() =>
+            {
+                if let Some(bar) = scrollbar {
+                    state.scroll = bar.scroll_to(position.y, state.scrollbar_grab.unwrap());
+                }
+                shell.capture_event();
+                shell.invalidate_layout();
+                shell.request_redraw();
+                return;
+            }
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) if over_scrollbar => {
+                let bar = scrollbar.unwrap();
+                let position = cursor.position().unwrap();
+                // Keep the grabbed point under the pointer. A track click centers
+                // the thumb there and can continue directly into a drag.
+                let grab = if bar.thumb.contains(position) {
+                    (position.y - bar.thumb.y) / bar.thumb.height
+                } else {
+                    0.5
+                };
+                state.scrollbar_grab = Some(grab);
+                state.scroll = bar.scroll_to(position.y, grab);
+                // Like a document checkbox, its scrollbar belongs to the editor.
+                // Restore input focus after the root focus scope handles the press.
+                tree.children[0]
+                    .state
+                    .downcast_mut::<text_editor::State<text::highlighter::PlainText>>()
+                    .focus();
+                shell.capture_event();
+                shell.invalidate_layout();
+                shell.request_redraw();
+                return;
+            }
+            Event::Mouse(mouse::Event::WheelScrolled { delta }) if over_viewport => {
+                // Handle raw deltas before the native source editor converts
+                // pixels to integer lines. Trackpads stay smooth and 1:1; mouse
+                // wheels move one rendered row per line, with no extra multiplier.
+                let pixels = match delta {
+                    mouse::ScrollDelta::Pixels { y, .. } => *y,
+                    mouse::ScrollDelta::Lines { y, .. } => y * self.size * 1.5,
+                };
+                if pixels != 0.0 {
+                    state.scroll = (state.scroll - pixels)
+                        .clamp(0.0, (state.height - layout.bounds().height).max(0.0));
+                    shell.capture_event();
+                    shell.invalidate_layout();
+                    shell.request_redraw();
+                }
+                return;
+            }
+            _ => {}
+        }
         if let Event::Keyboard(iced::keyboard::Event::KeyPressed {
             key,
             physical_key,
@@ -673,10 +755,6 @@ impl Widget<Message, Theme, Renderer> for MarkdownEditor<'_> {
                         continue;
                     }
                     shell.publish(Message::EditorCursor(state.hit(point), true));
-                }
-                Action::Scroll { lines } => {
-                    state.scroll = (state.scroll + lines as f32 * self.size)
-                        .clamp(0.0, (state.height - layout.bounds().height).max(0.0));
                 }
                 Action::Move(motion) | Action::Select(motion)
                     if matches!(
@@ -937,29 +1015,28 @@ impl Widget<Message, Theme, Renderer> for MarkdownEditor<'_> {
                 );
             }
         });
-        if let Some(viewport) = layout.bounds().intersection(viewport) {
+        if let (Some(viewport), Some(bar)) = (
+            layout.bounds().intersection(viewport),
+            Scrollbar::new(layout.bounds(), state.height, state.scroll),
+        ) {
             renderer.with_layer(viewport, |renderer| {
-                if state.height > layout.bounds().height {
-                    let height = (layout.bounds().height.powi(2) / state.height).max(24.0);
-                    let y = state.scroll / (state.height - layout.bounds().height)
-                        * (layout.bounds().height - height);
-                    renderer.fill_quad(
-                        renderer::Quad {
-                            bounds: Rectangle::new(
-                                Point::new(
-                                    layout.bounds().x + layout.bounds().width
-                                        - SCROLLBAR_WIDTH
-                                        - 2.0,
-                                    layout.bounds().y + y,
-                                ),
-                                Size::new(SCROLLBAR_WIDTH, height),
-                            ),
-                            border: Border::default().rounded(SCROLLBAR_WIDTH / 2.0),
-                            ..Default::default()
-                        },
-                        theme.extended_palette().secondary.weak.color,
-                    );
-                }
+                renderer.fill_quad(
+                    renderer::Quad {
+                        bounds: bar.thumb,
+                        border: Border::default().rounded(3),
+                        ..Default::default()
+                    },
+                    theme
+                        .palette()
+                        .text
+                        .scale_alpha(if state.scrollbar_grab.is_some() {
+                            0.65
+                        } else if state.scrollbar_hovered {
+                            0.5
+                        } else {
+                            0.35
+                        }),
+                );
             });
         }
     }
@@ -971,6 +1048,19 @@ impl Widget<Message, Theme, Renderer> for MarkdownEditor<'_> {
         viewport: &Rectangle,
         renderer: &Renderer,
     ) -> mouse::Interaction {
+        let state = tree.state.downcast_ref::<State>();
+        if state.scrollbar_grab.is_some() {
+            return mouse::Interaction::Grabbing;
+        }
+        if layout
+            .bounds()
+            .intersection(viewport)
+            .is_some_and(|bounds| cursor.is_over(bounds))
+            && Scrollbar::new(layout.bounds(), state.height, state.scroll)
+                .is_some_and(|bar| cursor.is_over(bar.track))
+        {
+            return mouse::Interaction::Grab;
+        }
         for (i, (_, _, check)) in self.controls.iter().enumerate() {
             let interaction = check.as_widget().mouse_interaction(
                 &tree.children[i + 1],
@@ -1098,10 +1188,13 @@ fn make_paragraph(line: &Line, size: f32, width: f32, theme: &Theme) -> Paragrap
         .iter()
         .map(|run| {
             let mut font = iced_m3::fonts::REGULAR;
-            if run.style.bold || line.heading.is_some() || line.table_header {
+            // Delimiters are annotations, not emphasized content. In nested
+            // formatting they must not introduce a new font face (and baseline)
+            // that is absent from the rendered content, e.g. ***`code`***.
+            if (run.style.bold && !run.style.muted) || line.heading.is_some() || line.table_header {
                 font.weight = font::Weight::Bold;
             }
-            if run.style.italic {
+            if run.style.italic && !run.style.muted {
                 font.style = font::Style::Italic;
             }
             if run.style.code {
@@ -1201,6 +1294,43 @@ mod tests {
                     .collect::<Vec<_>>()
             };
             assert_eq!(metrics(before), metrics(after), "{source}");
+        }
+    }
+
+    #[test]
+    fn nested_code_reveal_keeps_vertical_metrics_stable() {
+        super::super::fonts::ensure_loaded();
+        iced::advanced::graphics::text::font_system()
+            .write()
+            .unwrap()
+            .load_font(std::borrow::Cow::Borrowed(iced_m3::fonts::ROBOTO));
+        for source in [
+            "Text **`foo`** end",
+            "Text *`foo`* end",
+            "Text ***`foo`*** end",
+            "CRXJS + Vite + React + Tailwind, with **`lwk_wasm`**",
+        ] {
+            let start = source.find('*').unwrap();
+            let end = source.rfind('*').unwrap() + 1;
+            for size in [12.0, 17.0, 28.0] {
+                let metrics = |cursor| {
+                    let document = Document::parse(source, cursor);
+                    let paragraph = make_paragraph(&document.lines[0], size, 1600.0, &Theme::Light);
+                    paragraph
+                        .buffer()
+                        .layout_runs()
+                        .map(|run| (run.line_top, run.line_y, run.line_height))
+                        .collect::<Vec<_>>()
+                };
+                let hidden = metrics(None);
+                for offset in start - 1..=end {
+                    assert_eq!(
+                        metrics(Some(offset..offset)),
+                        hidden,
+                        "{source}, size {size}, cursor {offset}"
+                    );
+                }
+            }
         }
     }
 }

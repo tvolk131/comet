@@ -4,8 +4,10 @@ mod edit_history;
 pub mod fixtures;
 mod fonts;
 mod markdown_editor;
+mod scroll_input;
 #[cfg(test)]
 mod tests;
+mod theme;
 mod update;
 mod view;
 
@@ -80,6 +82,8 @@ pub enum NoteAction {
 #[derive(Debug, Clone)]
 pub enum Message {
     Tick,
+    WindowOpened(window::Id),
+    WindowScaleChanged(f32),
     FetchAttachment(String),
     OpenUrl(String),
     Select(String),
@@ -162,6 +166,7 @@ pub struct Comet {
     pub dialog: DialogState,
     pub dark: bool,
     pub font_size: f32,
+    pub window_scale_factor: f32,
     pub dirty: bool,
     pub error: Option<String>,
     pub notice: Option<String>,
@@ -206,6 +211,7 @@ impl Default for Comet {
             dialog: DialogState::default(),
             dark: false,
             font_size: 17.0,
+            window_scale_factor: 1.0,
             dirty: false,
             error: None,
             notice: None,
@@ -255,7 +261,7 @@ impl Comet {
         (app, task)
     }
     pub fn theme(&self) -> Theme {
-        Theme::from_accent(iced::Color::from_rgb8(83, 109, 83), self.dark)
+        theme::theme(self.dark)
     }
     pub fn view(&self) -> Element<'_, Message> {
         view::view(self)
@@ -264,6 +270,11 @@ impl Comet {
         Subscription::batch([
             iced::time::every(Duration::from_millis(250)).map(|_| Message::Tick),
             window::close_requests().map(Message::CloseWindow),
+            window::events().filter_map(|(id, event)| match event {
+                window::Event::Opened { .. } => Some(Message::WindowOpened(id)),
+                window::Event::Rescaled(scale) => Some(Message::WindowScaleChanged(scale)),
+                _ => None,
+            }),
             keyboard::listen().filter_map(|event| match event {
                 keyboard::Event::KeyPressed { key, modifiers, .. } => {
                     Some(Message::Key(key, modifiers))

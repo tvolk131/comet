@@ -81,6 +81,11 @@ impl EditorDriver {
         self
     }
 
+    pub fn display_scale(mut self, scale: f32) -> Self {
+        self.apply(vec![Message::WindowScaleChanged(scale)]);
+        self
+    }
+
     pub fn dark(mut self) -> Self {
         self.app.dark = true;
         self
@@ -346,11 +351,21 @@ impl EditorDriver {
     }
 
     pub fn wheel(&mut self, lines: f32) {
+        self.scroll(mouse::ScrollDelta::Lines { x: 0.0, y: lines });
+    }
+
+    pub fn wheel_pixels(&mut self, x: f32, y: f32) {
+        self.scroll(mouse::ScrollDelta::Pixels { x, y });
+    }
+
+    fn scroll(&mut self, delta: mouse::ScrollDelta) {
         let bounds = self.bounds();
         self.move_pointer(bounds.center());
-        self.event(Event::Mouse(mouse::Event::WheelScrolled {
-            delta: mouse::ScrollDelta::Lines { x: 0.0, y: lines },
-        }));
+        self.event(Event::Mouse(mouse::Event::WheelScrolled { delta }));
+    }
+
+    pub fn right_edge(&mut self) -> f32 {
+        f32::from(self.size.width) - self.bounds().x
     }
 
     pub fn drag(&mut self, from: (f32, f32), to: (f32, f32)) {

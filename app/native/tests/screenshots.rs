@@ -312,3 +312,31 @@ fn sidebar_tags_use_filter_chips_and_preserve_hierarchy() {
         }
     }
 }
+
+#[test]
+fn settings_scroll_distance_is_consistent_across_display_scales() {
+    for scale in [1.0, 2.0] {
+        let mut app = fixtures::notebook();
+        let _ = app.update(Message::WindowScaleChanged(scale));
+        app.dialog.show(Dialog::Settings);
+        let mut ui = simulator(&app, (640, 480));
+        let _ = ui.snapshot(&app.theme().reduced_motion(true)).unwrap();
+        let before = ui.find("Profile").unwrap().visible_bounds().unwrap();
+        ui.point_at(before.center());
+        ui.simulate([Event::Mouse(mouse::Event::WheelScrolled {
+            delta: mouse::ScrollDelta::Pixels {
+                x: 0.0,
+                y: -100.0 * scale,
+            },
+        })]);
+        let image = ui.snapshot(&app.theme().reduced_motion(true)).unwrap();
+        let after = ui.find("Profile").unwrap().visible_bounds().unwrap();
+        assert!(
+            (before.y - after.y - 100.0).abs() < 0.01,
+            "Dialog content must move 100 logical pixels at {scale}x DPI: {before:?} -> {after:?}"
+        );
+        baseline::assert_snapshot("settings-scrolled-640x480", |path| {
+            image.matches_image(path).unwrap()
+        });
+    }
+}

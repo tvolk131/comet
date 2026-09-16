@@ -798,6 +798,49 @@ fn formatting_reveal_keeps_text_and_following_lines_stationary() {
 }
 
 #[test]
+fn revealing_bold_inline_code_keeps_the_line_stationary() {
+    let source = "Text **`foo`** end\nBelow";
+    for size in [(640, 480), (1024, 768), (1440, 900)] {
+        for font_size in [17.0, 28.0] {
+            let mut ui = EditorDriver::new(source, size).font_size(font_size);
+            ui.click(0.0, 12.0);
+            for _ in 0..4 {
+                ui.key(ArrowRight);
+            }
+            let prefix = format!("interactions/stable-bold-code/{}-{font_size}", size.0);
+            ui.check(&format!("{prefix}/01-hidden"), source, (0, 4), None);
+            // Unchanged letters before the code and on the following line must
+            // not move when revealing the bold and inline-code delimiters.
+            let area =
+                iced::Rectangle::new(iced::Point::ORIGIN, iced::Size::new(25.0, font_size * 3.0));
+            let resting = ui.region(area);
+            ui.key(ArrowRight);
+            ui.check(&format!("{prefix}/02-revealed"), source, (0, 5), None);
+            assert!(
+                ui.region(area) == resting,
+                "revealing bold code moved the line"
+            );
+            for _ in 0..4 {
+                ui.key(ArrowRight);
+            }
+            ui.check(&format!("{prefix}/03-inside-word"), source, (0, 9), None);
+            assert!(
+                ui.region(area) == resting,
+                "entering bold code moved the line"
+            );
+            for _ in 0..5 {
+                ui.key(ArrowLeft);
+            }
+            ui.check(&format!("{prefix}/04-hidden-again"), source, (0, 4), None);
+            assert!(
+                ui.region(area) == resting,
+                "hiding bold code moved the line"
+            );
+        }
+    }
+}
+
+#[test]
 #[allow(clippy::float_cmp)] // Raster bounds are exact multiples of half a logical pixel.
 fn nested_formatting_reveals_together_when_crossing_either_edge() {
     for size in [(640, 480), (1024, 768), (1440, 900)] {
@@ -1088,5 +1131,117 @@ fn empty_lines_keep_full_spacing_when_spaces_are_added_or_removed() {
                 "{prefix}: typing moved the following text"
             );
         }
+    }
+}
+
+fn scrolling_source() -> String {
+    (0..80)
+        .map(|i| format!("Line {i:02}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn scrolling_preserves_pixel_deltas_and_moves_one_row_per_wheel_line() {
+    use iced::{Point, Rectangle, Size};
+    let source = scrolling_source();
+    for size in [(640, 480), (1024, 768), (1440, 900)] {
+        for font in [17.0, 28.0] {
+            for scale in [1.0, 2.0] {
+                let mut ui = EditorDriver::new(&source, size)
+                    .font_size(font)
+                    .display_scale(scale);
+                let prefix = format!("interactions/scroll-input/{}-{font}", size.0);
+                let region = |y| Rectangle::new(Point::new(0.0, y), Size::new(120.0, 100.0));
+                let original = ui.region(region(60.0));
+                ui.wheel_pixels(0.0, -10.0 * scale);
+                ui.check(&format!("{prefix}/01-pixels"), &source, (0, 0), None);
+                assert!(
+                    ui.region(region(50.0)) == original,
+                    "Trackpad pixels must map 1:1, at every font size"
+                );
+                for _ in 0..4 {
+                    ui.wheel_pixels(0.0, -0.25 * scale);
+                }
+                ui.check(&format!("{prefix}/02-fractional"), &source, (0, 0), None);
+                assert!(
+                    ui.region(region(49.0)) == original,
+                    "Small trackpad deltas must accumulate without line-sized jumps"
+                );
+                let stationary = ui.region(region(49.0));
+                ui.wheel_pixels(-100.0, 0.0);
+                assert!(
+                    ui.region(region(49.0)) == stationary,
+                    "Horizontal scrolling must not move the document vertically"
+                );
+                ui.wheel_pixels(0.0, 10_000.0);
+                ui.wheel(-1.0);
+                ui.check(&format!("{prefix}/03-wheel-line"), &source, (0, 0), None);
+                assert!(
+                    ui.region(region(60.0 - font * 1.5)) == original,
+                    "One wheel line should move one rendered text row"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn scrollbar_dragging_and_track_clicks_preserve_the_document_cursor() {
+    use iced::{Point, Rectangle, Size};
+    let source = scrolling_source();
+    for size in [(640, 480), (1024, 768), (1440, 900)] {
+        let mut ui = EditorDriver::new(&source, size);
+        let prefix = format!("interactions/scrollbar/{}", size.0);
+        ui.click(0.0, 12.0);
+        let area = Rectangle::new(Point::new(0.0, 0.0), Size::new(120.0, 200.0));
+        let top = ui.region(area);
+        let x = ui.right_edge() - 5.0;
+        let height = ui.bounds().height;
+        ui.press(x, 10.0);
+        ui.check(&format!("{prefix}/01-grabbed"), &source, (0, 0), None);
+        assert!(ui.region(area) == top, "Grabbing the thumb must not jump");
+        ui.move_to(x - 200.0, height + 100.0);
+        ui.check(
+            &format!("{prefix}/02-dragged-bottom"),
+            &source,
+            (0, 0),
+            None,
+        );
+        let bottom = ui.region(area);
+        assert!(
+            bottom != top,
+            "Dragging the scrollbar must scroll, even outside its track"
+        );
+        ui.release();
+        ui.assert_editor_focus(&prefix, true);
+        ui.wheel(-10_000.0);
+        assert!(
+            ui.region(area) == bottom,
+            "Dragging beyond the viewport must clamp to the bottom"
+        );
+        ui.move_to(x, height * 0.5);
+        assert!(ui.region(area) == bottom, "Release must end the drag");
+        ui.press(x, height - 10.0);
+        ui.move_to(x, -100.0);
+        ui.release();
+        ui.check(&format!("{prefix}/03-dragged-top"), &source, (0, 0), None);
+        assert!(
+            ui.region(area) == top,
+            "Dragging above the viewport must clamp to the top"
+        );
+        ui.click(x, height * 0.7);
+        ui.check(&format!("{prefix}/04-track-click"), &source, (0, 0), None);
+        assert!(
+            ui.region(area) != top,
+            "Clicking the track must move to that part of the note"
+        );
+        ui.type_text("X");
+        ui.check(
+            &format!("{prefix}/05-resume-typing"),
+            &format!("X{source}"),
+            (0, 1),
+            None,
+        );
     }
 }
