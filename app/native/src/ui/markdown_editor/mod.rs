@@ -912,7 +912,14 @@ impl Widget<Message, Theme, Renderer> for MarkdownEditor<'_> {
                             .background
                             .strong
                             .color
-                            .scale_alpha(data.opacity()),
+                            .scale_alpha(
+                                data.opacity()
+                                    * if data.quote {
+                                        1.0 - data.prefix_visibility
+                                    } else {
+                                        1.0
+                                    },
+                            ),
                     );
                 }
                 if data.hidden {
@@ -1044,7 +1051,10 @@ impl Widget<Message, Theme, Renderer> for MarkdownEditor<'_> {
                                 wrapping: text::Wrapping::None,
                             },
                             Point::new(origin.x - 26.0, origin.y),
-                            theme.palette().text.scale_alpha(data.opacity()),
+                            theme
+                                .palette()
+                                .text
+                                .scale_alpha(data.opacity() * (1.0 - data.prefix_visibility)),
                             clip,
                         );
                     }
@@ -1280,13 +1290,17 @@ fn draw_tags(
 }
 
 fn line_indent(line: &Line) -> f32 {
-    (if line.bullet.is_some() || line.task.is_some() {
+    let rendered = (if line.bullet.is_some() || line.task.is_some() {
         32.0
     } else if line.quote {
         18.0
     } else {
         0.0
-    }) + line.indent.min(12) as f32 * 16.0
+    }) + line.indent.min(12) as f32 * 16.0;
+    // Task boxes retain their own clickable gutter while their list/quote
+    // prefix is edited. Other prefixes replace the rendered gutter entirely.
+    let editing = if line.task.is_some() { 32.0 } else { 0.0 };
+    rendered + (editing - rendered) * line.prefix_visibility
 }
 
 fn line_size(line: &Line, size: f32) -> f32 {

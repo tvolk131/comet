@@ -1288,3 +1288,107 @@ fn wrapped_reveal_does_not_fade_unchanged_text() {
         }
     }
 }
+
+#[test]
+fn heading_markers_hide_after_crossing_a_line_break() {
+    use iced::Rectangle;
+    for size in [(640, 480), (1024, 768), (1440, 900)] {
+        for (ending_name, ending) in [("lf", "\n"), ("crlf", "\r\n")] {
+            let source = format!("# Heading{ending}Body");
+            let mut ui = EditorDriver::new(&source, size);
+            let heading_area = Rectangle {
+                x: 0.0,
+                y: 0.0,
+                width: 200.0,
+                height: 50.0,
+            };
+            let resting = ui.region(heading_area);
+            let prefix = format!(
+                "interactions/heading-line-boundary/{ending_name}-{}",
+                size.0
+            );
+            ui.click(0.0, 18.0);
+            ui.key(End);
+            ui.check(&format!("{prefix}/01-heading-end"), &source, (0, 9), None);
+            assert!(
+                ui.region(heading_area) != resting,
+                "Heading markers reveal before the break"
+            );
+            ui.key(ArrowRight);
+            ui.check(&format!("{prefix}/02-next-line"), &source, (1, 0), None);
+            assert!(
+                ui.region(heading_area) == resting,
+                "Heading markers must hide after the break"
+            );
+            ui.key(ArrowLeft);
+            assert_eq!(ui.cursor(), (0, 9));
+            assert!(ui.region(heading_area) != resting);
+            // The next physical line starts after the H1 row and its spacing.
+            ui.click(0.0, 17.0 * 1.5 * 1.85 + 8.0 + 12.0);
+            ui.check(
+                &format!("{prefix}/03-click-next-line"),
+                &source,
+                (1, 0),
+                None,
+            );
+            assert!(ui.region(heading_area) == resting);
+            if ending == "\n" {
+                ui.key(ArrowLeft);
+                ui.key(Enter);
+                ui.check(
+                    &format!("{prefix}/04-enter-empty-line"),
+                    "# Heading\n\nBody",
+                    (1, 0),
+                    None,
+                );
+                assert!(
+                    ui.region(heading_area) == resting,
+                    "An empty new line must not reveal the preceding heading"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn list_and_quote_markers_reveal_and_can_be_edited() {
+    for size in [(640, 480), (1024, 768), (1440, 900)] {
+        for (name, prefix, x) in [
+            ("bullet", "- ", 32.0),
+            ("ordered", "12) ", 32.0),
+            ("quote", "> ", 18.0),
+            ("nested-quote", "  > > ", 34.0),
+        ] {
+            let raw = format!("{prefix}café");
+            let source = format!("{raw}\nAfter");
+            let mut ui = EditorDriver::new(&source, size);
+            let snapshots = format!("interactions/block-prefix/{name}-{}", size.0);
+            ui.check(&format!("{snapshots}/01-rendered"), &source, (0, 0), None);
+            ui.click(x + 1.0, 12.0);
+            ui.key(End);
+            ui.check(
+                &format!("{snapshots}/02-revealed"),
+                &source,
+                (0, raw.len()),
+                None,
+            );
+            ui.key(ArrowRight);
+            ui.check(&format!("{snapshots}/03-next-line"), &source, (1, 0), None);
+            ui.key(ArrowLeft);
+            ui.key(Home);
+            let leading = prefix.len() - prefix.trim_start().len();
+            for _ in 0..leading {
+                ui.key(ArrowRight);
+            }
+            ui.key(Delete);
+            let mut edited = source.clone();
+            edited.remove(leading);
+            ui.check(
+                &format!("{snapshots}/04-delete-marker"),
+                &edited,
+                (0, leading),
+                None,
+            );
+        }
+    }
+}

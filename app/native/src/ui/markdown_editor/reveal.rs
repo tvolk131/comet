@@ -173,6 +173,8 @@ fn characters(line: &Line) -> BTreeMap<usize, (&Style, f32)> {
 }
 
 fn interpolate_line(line: &mut Line, before: &Line, after: &Line, source: &str, amount: f32) {
+    line.prefix_visibility =
+        before.prefix_visibility + (after.prefix_visibility - before.prefix_visibility) * amount;
     let from = characters(before);
     let to = characters(after);
     line.text.clear();
