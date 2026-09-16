@@ -268,10 +268,16 @@ impl Document {
                         .find(|line| line.source.contains(&range.start))
                     {
                         line.task = Some((range.start + 1, checked));
-                        // Keep the hit target available while editing its label.
-                        hidden[range.clone()].fill(true);
+                        let active = intersects(&cursor, &line.source);
+                        let mut marker = range.clone();
                         if source.as_bytes().get(range.end) == Some(&b' ') {
-                            hidden[range.end] = true;
+                            marker.end += 1;
+                        }
+                        hidden[marker.clone()].fill(!active);
+                        if active {
+                            for style in &mut styles[marker] {
+                                style.muted = true;
+                            }
                         }
                     }
                 }
@@ -531,14 +537,24 @@ mod tests {
     }
 
     #[test]
-    fn task_list_prefix_reveals_without_losing_the_checkbox() {
+    fn task_list_marker_reveals_as_editable_source_on_its_line() {
         for marker in ["[ ]", "[x]", "[X]"] {
             let source = format!("- {marker} Task\nAfter");
             let resting = Document::parse(&source, None);
-            let active = Document::parse(&source, Some(8..8));
             assert_eq!(resting.lines[0].text, "Task");
-            assert_eq!(active.lines[0].text, "- Task");
-            assert_eq!(active.lines[0].task, resting.lines[0].task);
+            for offset in 0..=10 {
+                let active = Document::parse(&source, Some(offset..offset));
+                assert_eq!(active.lines[0].text, format!("- {marker} Task"));
+                assert_eq!(active.lines[0].task, resting.lines[0].task);
+                assert_eq!(
+                    active.lines[0].source_at(active.lines[0].display_at(offset)),
+                    offset
+                );
+            }
+            assert_eq!(
+                Document::parse(&source, Some(11..11)).lines[0],
+                resting.lines[0]
+            );
         }
         let code = "```md\n- item\n> quote\n```";
         let active = Document::parse(code, Some(7..7));

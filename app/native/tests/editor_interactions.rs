@@ -56,6 +56,7 @@ held_click_tests! {
     held_click_on_heading_does_not_select_text: "heading", "# foo\nbody", |_| (0.5, 18.0), (0, 2);
     held_click_in_quote_does_not_select_text: "quote", "> **foo**\n\nbody", |_| (32.0, 12.0), (0, 6);
     held_click_in_list_does_not_select_text: "list", "- **foo**\n- bar", |_| (46.0, 12.0), (0, 6);
+    held_click_on_task_text_does_not_select_text: "task", "- [ ] **foo**\nAfter", |_| (46.0, 12.0), (0, 10);
     held_click_in_table_does_not_select_text: "table", "| Name | Status |\n| --- | --- |\n| Comet | Ready |\n\nAfter", |width| ((width - 8.0) / 2.0 + 13.0, 51.0), (2, 10);
     held_click_in_code_block_does_not_select_text: "fence", "```rust\nlet foo = 1;\n```\nAfter", |_| (20.0, 37.5), (1, 2);
 }
@@ -1390,5 +1391,81 @@ fn list_and_quote_markers_reveal_and_can_be_edited() {
                 None,
             );
         }
+    }
+}
+
+#[test]
+fn task_markers_are_text_while_editing_and_checkboxes_elsewhere() {
+    for size in [(640, 480), (1024, 768), (1440, 900)] {
+        let source = "- [ ] Plan\nAfter";
+        let checked = "- [x] Plan\nAfter";
+        let mut ui = EditorDriver::new(source, size);
+        let prefix = format!("interactions/task-source/{}", size.0);
+        ui.check(&format!("{prefix}/01-rendered"), source, (0, 0), None);
+        ui.click(45.0, 12.0);
+        ui.key(End);
+        ui.check(
+            &format!("{prefix}/02-label-reveals-marker"),
+            source,
+            (0, 10),
+            None,
+        );
+        // The old checkbox hit area must now place a text caret, never toggle.
+        ui.click(10.0, 12.0);
+        ui.key(Home);
+        for _ in 0..3 {
+            ui.key(ArrowRight);
+        }
+        ui.check(
+            &format!("{prefix}/03-caret-in-marker"),
+            source,
+            (0, 3),
+            None,
+        );
+        ui.key(Delete);
+        ui.type_text("x");
+        ui.check(&format!("{prefix}/04-edit-marker"), checked, (0, 4), None);
+        ui.key(End);
+        ui.key(ArrowRight);
+        ui.check(&format!("{prefix}/05-leave-line"), checked, (1, 0), None);
+        ui.click(10.0, 12.0);
+        ui.check(
+            &format!("{prefix}/06-toggle-elsewhere"),
+            source,
+            (1, 0),
+            None,
+        );
+        ui.shortcut("z");
+        ui.check(&format!("{prefix}/07-undo-toggle"), checked, (1, 0), None);
+        ui.key(ArrowLeft);
+        ui.check(
+            &format!("{prefix}/08-return-to-checked-task"),
+            checked,
+            (0, 10),
+            None,
+        );
+        ui.blur();
+        ui.check(
+            &format!("{prefix}/09-blur-restores-checkbox"),
+            checked,
+            (0, 10),
+            None,
+        );
+        // Restoring focus must not remove the control between press and release.
+        ui.press(10.0, 12.0);
+        ui.move_to(10.5, 12.5);
+        ui.check(
+            &format!("{prefix}/10-checkbox-held"),
+            checked,
+            (0, 10),
+            None,
+        );
+        ui.release();
+        ui.check(
+            &format!("{prefix}/11-checkbox-released"),
+            source,
+            (0, 10),
+            None,
+        );
     }
 }

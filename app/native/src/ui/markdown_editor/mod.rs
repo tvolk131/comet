@@ -198,6 +198,12 @@ struct LayoutCell {
 }
 
 impl State {
+    fn control_visible(&self, line: usize, is_check: bool) -> bool {
+        // A revealed task marker owns its text hit area. Keep the control's
+        // widget state, but exclude it from paint, input, and focus traversal.
+        !is_check || self.document.lines[line].prefix_visibility == 0.0
+    }
+
     fn hit(&self, point: Point) -> usize {
         let y = point.y + self.scroll;
         let Some((i, line)) = self
@@ -486,6 +492,7 @@ impl Widget<Message, Theme, Renderer> for MarkdownEditor<'_> {
             .clamp(0.0, (state.height - limits.max().height).max(0.0));
         let mut children = vec![input];
         for (i, (line, is_check, check)) in self.controls.iter_mut().enumerate() {
+            let visible = state.control_visible(*line, *is_check);
             let line = &state.lines[*line];
             children.push(
                 check
@@ -522,6 +529,14 @@ impl Widget<Message, Theme, Renderer> for MarkdownEditor<'_> {
                             },
                     )),
             );
+            if !visible {
+                check.as_widget_mut().operate(
+                    &mut tree.children[i + 1],
+                    Layout::new(&children[i + 1]),
+                    renderer,
+                    &mut widget::operation::focusable::unfocus::<()>(),
+                );
+            }
         }
         layout::Node::with_children(limits.max(), children)
     }
@@ -681,7 +696,14 @@ impl Widget<Message, Theme, Renderer> for MarkdownEditor<'_> {
         let Some(clip) = content_bounds.intersection(viewport) else {
             return;
         };
-        for (i, (_, is_check, check)) in self.controls.iter_mut().enumerate() {
+        for (i, (line, is_check, check)) in self.controls.iter_mut().enumerate() {
+            if !tree
+                .state
+                .downcast_ref::<State>()
+                .control_visible(*line, *is_check)
+            {
+                continue;
+            }
             let bounds = layout.child(i + 1).bounds();
             if bounds.intersects(&clip) {
                 // Capture is shared by sibling widgets. Only this control's
@@ -710,6 +732,13 @@ impl Widget<Message, Theme, Renderer> for MarkdownEditor<'_> {
                         // A task box belongs to the document. Keep typing at the
                         // existing caret after a pointer toggle; Tab can still
                         // focus the Material checkbox for keyboard activation.
+                        // Freeze the projection until release, just like text
+                        // clicks: restoring focus may reveal this task's source.
+                        tree.state.downcast_mut::<State>().pointer = Some(PointerGesture {
+                            origin: cursor.position().unwrap()
+                                - Vector::new(content_bounds.x, content_bounds.y),
+                            dragging: false,
+                        });
                         check.as_widget_mut().operate(
                             &mut tree.children[i + 1],
                             layout.child(i + 1),
@@ -1088,7 +1117,10 @@ impl Widget<Message, Theme, Renderer> for MarkdownEditor<'_> {
                     span += 1;
                 }
             }
-            for (i, (_, _, check)) in self.controls.iter().enumerate() {
+            for (i, (line, is_check, check)) in self.controls.iter().enumerate() {
+                if !state.control_visible(*line, *is_check) {
+                    continue;
+                }
                 check.as_widget().draw(
                     &tree.children[i + 1],
                     renderer,
@@ -1168,7 +1200,10 @@ impl Widget<Message, Theme, Renderer> for MarkdownEditor<'_> {
         {
             return mouse::Interaction::Grab;
         }
-        for (i, (_, _, check)) in self.controls.iter().enumerate() {
+        for (i, (line, is_check, check)) in self.controls.iter().enumerate() {
+            if !state.control_visible(*line, *is_check) {
+                continue;
+            }
             let interaction = check.as_widget().mouse_interaction(
                 &tree.children[i + 1],
                 layout.child(i + 1),
@@ -1199,7 +1234,14 @@ impl Widget<Message, Theme, Renderer> for MarkdownEditor<'_> {
             renderer,
             operation,
         );
-        for (i, (_, _, check)) in self.controls.iter_mut().enumerate() {
+        for (i, (line, is_check, check)) in self.controls.iter_mut().enumerate() {
+            if !tree
+                .state
+                .downcast_ref::<State>()
+                .control_visible(*line, *is_check)
+            {
+                continue;
+            }
             check.as_widget_mut().operate(
                 &mut tree.children[i + 1],
                 layout.child(i + 1),
@@ -1297,10 +1339,7 @@ fn line_indent(line: &Line) -> f32 {
     } else {
         0.0
     }) + line.indent.min(12) as f32 * 16.0;
-    // Task boxes retain their own clickable gutter while their list/quote
-    // prefix is edited. Other prefixes replace the rendered gutter entirely.
-    let editing = if line.task.is_some() { 32.0 } else { 0.0 };
-    rendered + (editing - rendered) * line.prefix_visibility
+    rendered * (1.0 - line.prefix_visibility)
 }
 
 fn line_size(line: &Line, size: f32) -> f32 {

@@ -527,10 +527,15 @@ impl EditorDriver {
 
     fn capture(&mut self) -> Capture {
         self.redraw();
-        // Capture the settled Material state, including nested themed controls.
-        // Advancing the redraw timestamp avoids wall-clock sleeps and animation
-        // timing differences between fast local runs and slower CI machines.
-        self.capture_at(iced::time::Instant::now() + std::time::Duration::from_secs(2))
+        // Settle the editor projection first, then update newly visible Material
+        // controls and settle their feedback. A checkbox revealed by layout does
+        // not receive that frame's earlier update; one future redraw alone can
+        // therefore capture stale hover/selection state on faster machines.
+        // Keep live-frame captures separate and avoid wall-clock sleeps.
+        let now = iced::time::Instant::now();
+        self.redraw_at(now + std::time::Duration::from_secs(2));
+        self.redraw_at(now + std::time::Duration::from_secs(4));
+        self.capture_at(now + std::time::Duration::from_secs(6))
     }
 
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // Rounded, clamped pixel coordinates in a u16 viewport.
